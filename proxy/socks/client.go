@@ -55,6 +55,9 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	}
 	// Destination of the inner request.
 	destination := outbound.Target
+	if outbound.TargetToIP.Address != nil {
+		destination = outbound.TargetToIP
+	}
 
 	// Outbound server.
 	var server *protocol.ServerSpec

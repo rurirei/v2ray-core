@@ -72,6 +72,9 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 		return newError("target not specified.")
 	}
 	target := outbound.Target
+	if outbound.TargetToIP.Address != nil {
+		target = outbound.TargetToIP
+	}
 	targetAddr := target.NetAddr()
 
 	if target.Network == net.Network_UDP {

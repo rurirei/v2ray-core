@@ -54,6 +54,9 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 		return newError("target not specified")
 	}
 	destination := outbound.Target
+	if outbound.TargetToIP.Address != nil {
+		destination = outbound.TargetToIP
+	}
 	network := destination.Network
 
 	var server *protocol.ServerSpec

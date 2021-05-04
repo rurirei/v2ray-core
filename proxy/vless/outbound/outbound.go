@@ -82,6 +82,9 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 	}
 
 	target := outbound.Target
+	if outbound.TargetToIP.Address != nil {
+		target = outbound.TargetToIP
+	}
 	newError("tunneling request to ", target, " via ", rec.Destination()).AtInfo().WriteToLog(session.ExportIDToError(ctx))
 
 	command := protocol.RequestCommandTCP
