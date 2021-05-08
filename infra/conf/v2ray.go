@@ -70,6 +70,9 @@ func (c *SniffingConfig) Build() (*proxyman.SniffingConfig, error) {
 	if c.DestOverride != nil {
 		for _, domainOverride := range *c.DestOverride {
 			switch strings.ToLower(domainOverride) {
+			case "dns":
+				// no domainOverride for dns request
+				// p = append(p, "dns")
 			case "http":
 				p = append(p, "http")
 			case "tls", "https", "ssl":
