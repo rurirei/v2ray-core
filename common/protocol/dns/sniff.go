@@ -11,11 +11,11 @@ type SniffHeader struct {
 }
 
 func (h *SniffHeader) Protocol() string {
-	return "dns"
+	return h.domain
 }
 
 func (h *SniffHeader) Domain() string {
-	return h.domain
+	return "dns"
 }
 
 func ParseIPQuery(b []byte) (r bool, domain string, id uint16, qType dnsmessage.Type) {

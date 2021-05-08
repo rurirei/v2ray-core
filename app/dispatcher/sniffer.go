@@ -34,10 +34,10 @@ type Sniffer struct {
 func NewSniffer(ctx context.Context) *Sniffer {
 	ret := &Sniffer{
 		sniffer: []protocolSnifferWithMetadata{
-			{func(c context.Context, b []byte) (SniffResult, error) { return dns_proto.SniffDNS(b) }, false},
 			{func(c context.Context, b []byte) (SniffResult, error) { return http.SniffHTTP(b) }, false},
 			{func(c context.Context, b []byte) (SniffResult, error) { return tls.SniffTLS(b) }, false},
 			{func(c context.Context, b []byte) (SniffResult, error) { return bittorrent.SniffBittorrent(b) }, false},
+			{func(c context.Context, b []byte) (SniffResult, error) { return dns_proto.SniffDNS(b) }, true},
 		},
 	}
 	if sniffer, err := newFakeDNSSniffer(ctx); err == nil {
@@ -53,11 +53,12 @@ func NewSniffer(ctx context.Context) *Sniffer {
 
 var errUnknownContent = newError("unknown content")
 
-func (s *Sniffer) Sniff(c context.Context, payload []byte) (SniffResult, error) {
+func (s *Sniffer) Sniff(c context.Context, payload []byte, metadataSniffer bool) (SniffResult, error) {
 	var pendingSniffer []protocolSnifferWithMetadata
+	var resultDNSRequest SniffResult
 	for _, si := range s.sniffer {
 		s := si.protocolSniffer
-		if si.metadataSniffer {
+		if si.metadataSniffer != metadataSniffer {
 			continue
 		}
 		result, err := s(c, payload)
@@ -67,35 +68,19 @@ func (s *Sniffer) Sniff(c context.Context, payload []byte) (SniffResult, error) 
 		}
 
 		if err == nil && result != nil {
+			if si.metadataSniffer && result.Domain() == "dns" {
+				resultDNSRequest = result
+				continue
+			}
+			if si.metadataSniffer && resultDNSRequest != nil {
+				return CompositeResult(result, resultDNSRequest), nil
+			}
 			return result, nil
 		}
 	}
 
-	if len(pendingSniffer) > 0 {
-		s.sniffer = pendingSniffer
-		return nil, common.ErrNoClue
-	}
-
-	return nil, errUnknownContent
-}
-
-func (s *Sniffer) SniffMetadata(c context.Context) (SniffResult, error) {
-	var pendingSniffer []protocolSnifferWithMetadata
-	for _, si := range s.sniffer {
-		s := si.protocolSniffer
-		if !si.metadataSniffer {
-			pendingSniffer = append(pendingSniffer, si)
-			continue
-		}
-		result, err := s(c, nil)
-		if err == common.ErrNoClue {
-			pendingSniffer = append(pendingSniffer, si)
-			continue
-		}
-
-		if err == nil && result != nil {
-			return result, nil
-		}
+	if resultDNSRequest != nil {
+		return resultDNSRequest, nil
 	}
 
 	if len(pendingSniffer) > 0 {
