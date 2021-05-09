@@ -179,11 +179,11 @@ func (d *DefaultDispatcher) getLink(ctx context.Context) (*transport.Link, *tran
 
 func shouldOverride(result SniffResult, domainOverride []string) bool {
 	protocolString := result.Protocol()
-	if resComp, ok := result.(SnifferResultComposite); ok {
-		protocolString = resComp.ProtocolForDomainResult()
+	if resComp, ok := result.(CompositeSnifferResult); ok {
+		protocolString = resComp.ProtocolOfDomainResult()
 	}
 	for _, p := range domainOverride {
-		if strings.HasPrefix(protocolString, p) {
+		if strings.EqualFold(protocolString, p) {
 			return true
 		}
 		if resultSubset, ok := result.(SnifferIsProtoSubsetOf); ok {
@@ -212,12 +212,36 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, destination net.Destin
 		ctx = session.ContextWithContent(ctx, content)
 	}
 	sniffingRequest := content.SniffingRequest
+
+	sniff := func(metadataOnly bool) {
+		cReader := &cachedReader{
+			reader: outbound.Reader.(*pipe.Reader),
+		}
+		outbound.Reader = cReader
+		result, err := sniffer(ctx, cReader, metadataOnly)
+		if err == nil {
+			protocolString := result.Protocol()
+			if resComp, ok := result.(CompositeSnifferResult); ok && strings.EqualFold(protocolString, "dns") {
+				protocolString = resComp.ProtocolOfDomainResult()
+			}
+			content.Protocol = protocolString
+
+			if shouldOverride(result, sniffingRequest.OverrideDestinationForProtocol) {
+				domain := result.Domain()
+				newError("sniffed domain: ", domain).WriteToLog(session.ExportIDToError(ctx))
+				destination.Address = net.ParseAddress(domain)
+				ob.Target = destination
+			}
+		}
+		d.routedDispatch(ctx, outbound, destination)
+	}
+
 	switch {
 	case !sniffingRequest.Enabled:
 		go d.routedDispatch(ctx, outbound, destination)
 	case destination.Network != net.Network_TCP:
 		// Only metadata sniff will be used for non tcp connection
-		result, err := sniffer(ctx, nil, true)
+		/* result, err := sniffer(ctx, nil, true)
 		if err == nil {
 			content.Protocol = result.Protocol()
 			if shouldOverride(result, sniffingRequest.OverrideDestinationForProtocol) {
@@ -227,25 +251,10 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, destination net.Destin
 				ob.Target = destination
 			}
 		}
-		go d.routedDispatch(ctx, outbound, destination)
+		go d.routedDispatch(ctx, outbound, destination) */
+		go sniff(true)
 	default:
-		go func() {
-			cReader := &cachedReader{
-				reader: outbound.Reader.(*pipe.Reader),
-			}
-			outbound.Reader = cReader
-			result, err := sniffer(ctx, cReader, sniffingRequest.MetadataOnly)
-			if err == nil {
-				content.Protocol = result.Protocol()
-			}
-			if err == nil && shouldOverride(result, sniffingRequest.OverrideDestinationForProtocol) {
-				domain := result.Domain()
-				newError("sniffed domain: ", domain).WriteToLog(session.ExportIDToError(ctx))
-				destination.Address = net.ParseAddress(domain)
-				ob.Target = destination
-			}
-			d.routedDispatch(ctx, outbound, destination)
-		}()
+		go sniff(sniffingRequest.MetadataOnly)
 	}
 	return inbound, nil
 }
@@ -256,13 +265,7 @@ func sniffer(ctx context.Context, cReader *cachedReader, metadataOnly bool) (Sni
 
 	sniffer := NewSniffer(ctx)
 
-	metaresult, metadataErr := sniffer.SniffMetadata(ctx)
-
-	if metadataOnly {
-		return metaresult, metadataErr
-	}
-
-	contentResult, contentErr := func() (SniffResult, error) {
+	sniff := func(metadataSniffer bool) (SniffResult, error) {
 		totalAttempt := 0
 		for {
 			select {
@@ -276,7 +279,7 @@ func sniffer(ctx context.Context, cReader *cachedReader, metadataOnly bool) (Sni
 
 				cReader.Cache(payload)
 				if !payload.IsEmpty() {
-					result, err := sniffer.Sniff(ctx, payload.Bytes())
+					result, err := sniffer.Sniff(ctx, payload.Bytes(), metadataSniffer)
 					if err != common.ErrNoClue {
 						return result, err
 					}
@@ -286,7 +289,18 @@ func sniffer(ctx context.Context, cReader *cachedReader, metadataOnly bool) (Sni
 				}
 			}
 		}
-	}()
+	}
+
+	// tcp: no dns request as no effects
+	// udp: do metadataSniffer (dns and fakedns) only
+	metaresult, metadataErr := sniff(true)
+
+	if metadataOnly {
+		return metaresult, metadataErr
+	}
+
+	contentResult, contentErr := sniff(false)
+
 	if contentErr != nil && metadataErr == nil {
 		return metaresult, nil
 	}

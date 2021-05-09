@@ -15,7 +15,7 @@ func (h *SniffHeader) Protocol() string {
 }
 
 func (h *SniffHeader) Domain() string {
-	return h.domain
+	return "dns://" + h.domain
 }
 
 func ParseIPQuery(b []byte) (r bool, domain string, id uint16, qType dnsmessage.Type) {
