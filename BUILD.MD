@@ -6,8 +6,8 @@
 ## Run
 
 1. place the `conf.conf` json file into the working directory
-2. call conf.Loads() like this
-
+2. run the bin file by `go build`, then ok
+3. you could also call conf.Loads() like this
 ```go
 import "v2ray.com/core/common/settings/conf"
 
